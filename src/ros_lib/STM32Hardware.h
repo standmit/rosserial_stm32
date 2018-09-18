@@ -35,9 +35,7 @@
 #ifndef ROS_STM32_HARDWARE_H_
 #define ROS_STM32_HARDWARE_H_
 
-#include "stm32f3xx_hal.h"
-#include "stm32f3xx_hal_uart.h"
-#include "stm32f3xx_hal_tim.h"
+#include "STM32FXXX.h"
 
 extern TIM_HandleTypeDef htim2;
 extern UART_HandleTypeDef huart2;

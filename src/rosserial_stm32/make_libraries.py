@@ -37,9 +37,9 @@ THIS_PACKAGE = "rosserial_stm32"
 
 __usage__ = """
 make_libraries.py generates the STM32 rosserial library files for SW4STM32.
-It requires the location of your SWSTM32 project folder.
+It requires the family of your STM32 and location of your SWSTM32 project folder.
 
-rosrun rosserial_stm32 make_libraries.py <output_path>
+rosrun rosserial_stm32 make_libraries.py F3 <output_path>
 """
 
 import rospkg
@@ -70,26 +70,61 @@ ROS_TO_EMBEDDED_TYPES = {
 }
 
 # need correct inputs
-if (len(sys.argv) < 2):
+if (len(sys.argv) < 3):
     print __usage__
+    exit()
+
+# parse family
+family = sys.argv[1]
+if (family[0] != "F") or (len(family) < 2) or (len(family) > 4) or (not family[1:].isdigit()):
+    
+    if family[0] != "F":
+        print "Error 1"
+    if len(family) < 2:
+        print "Error 2"
+    if len(family) > 4:
+        print "Error 3"
+    if not family[1:].isdigit():
+        print "Error 4"
+    print "Family = " + family
+    
+    print ("Wrong family!")
+    print __usage__
+    exit()
+while len(family) < 4:
+    family += "X"
+header_filename = "STM32%s.h"
+family = header_filename % (family);
+
+rospack = rospkg.RosPack()
+rosserial_stm32_dir = rospack.get_path(THIS_PACKAGE)
+family_dir = rosserial_stm32_dir + "/src/rosserial_stm32/family/"
+files = os.listdir(family_dir[:-1])
+have_family = False
+for f in files:
+    if f == family:
+        have_family = True
+        break
+if not have_family:
+    print "There is not header file for " + family[:-2]
     exit()
     
 # get output path
-path = sys.argv[1]
+path = sys.argv[2]
 if path[-1] == "/":
     path = path[0:-1]
+path += "/Inc/"
 print "\nExporting to %s" % path
 
-rospack = rospkg.RosPack()
-
 # copy ros_lib stuff in
-rosserial_stm32_dir = rospack.get_path(THIS_PACKAGE)
-files = os.listdir(rosserial_stm32_dir+"/src/ros_lib")
+src_lib_dir = rosserial_stm32_dir + "/src/ros_lib/"
+shutil.copyfile(family_dir + family, path + header_filename % ("FXXX"))
+files = os.listdir(src_lib_dir[:-1])
 for f in files:
-  if os.path.isfile(rosserial_stm32_dir+"/src/ros_lib/"+f):
-    shutil.copy(rosserial_stm32_dir+"/src/ros_lib/"+f, path+"/Inc/")
-rosserial_client_copy_files(rospack, path+"/Inc/")
+  if os.path.isfile(src_lib_dir + f):
+    shutil.copyfile(src_lib_dir + f, path + f)
+rosserial_client_copy_files(rospack, path)
 
 # generate messages
-rosserial_generate(rospack, path+"/Inc/", ROS_TO_EMBEDDED_TYPES)
+rosserial_generate(rospack, path, ROS_TO_EMBEDDED_TYPES)
 

@@ -113,10 +113,11 @@ if not have_family:
 path = sys.argv[2]
 if path[-1] == "/":
     path = path[0:-1]
-path += "/Inc/"
+path += "/ROS/"
 print "\nExporting to %s" % path
 
 # copy ros_lib stuff in
+os.mkdir(path)
 src_lib_dir = rosserial_stm32_dir + "/src/ros_lib/"
 shutil.copyfile(family_dir + family, path + header_filename % ("FXXX"))
 files = os.listdir(src_lib_dir[:-1])

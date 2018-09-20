@@ -42,6 +42,9 @@ extern UART_HandleTypeDef huart1;
 class STM32Hardware {
   protected:
     UART_HandleTypeDef *huart;
+  
+    uint8_t tick_period_ms;
+    uint32_t systick_period_ns;
 
   public:
     STM32Hardware(UART_HandleTypeDef *huart_):
@@ -53,7 +56,14 @@ class STM32Hardware {
     { }
   
     void init()
-    { }
+    {
+      tick_period_ms = 1000 / HAL_GetTickFreq(); // 1 / HAL_GetTickFreq() * 1000
+      if (SysTick->CTRL && SYSTICK_CLKSOURCE_HCLK) {
+		    systick_period_ns = 1000000000 / HAL_RCC_GetHCLKFreq(); // 1 / ( HAL_RCC_GetHCLKFreq() / 1 ) * 1000000000
+      } else {
+		    systick_period_ns = 8000000000 / HAL_RCC_GetHCLKFreq(); // 1 / ( HAL_RCC_GetHCLKFreq() / 8 ) * 1000000000
+      }
+    }
 
     int read() {
       uint8_t rxByte;
@@ -68,6 +78,10 @@ class STM32Hardware {
 
     unsigned long time() {
       return HAL_GetTick();
+    }
+  
+    uint64_t time_ns() {
+    	return (uint64_t)time() * 1000000 + SysTick->VAL * systick_period_ns;
     }
 
   protected:

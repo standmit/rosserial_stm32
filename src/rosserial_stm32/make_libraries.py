@@ -120,7 +120,6 @@ print "\nExporting to %s" % path
 src_lib_dir = rosserial_stm32_dir + "/src/ros_lib/"
 shutil.copytree(src_lib_dir, path)
 shutil.copy(family_dir + family, path + header_filename % ("FXXX"))
-rosserial_client_copy_files(rospack, path)
 
 # generate messages
 rosserial_generate(rospack, path, ROS_TO_EMBEDDED_TYPES)

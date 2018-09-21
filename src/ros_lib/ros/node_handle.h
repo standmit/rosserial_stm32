@@ -107,7 +107,7 @@ protected:
   Hardware hardware_;
 
   /* time used for syncing */
-  uint32_t rt_time;
+  uint64_t rt_time;
 
   /* used for computing current time */
   uint32_t sec_offset, nsec_offset;
@@ -373,17 +373,17 @@ public:
   {
     std_msgs::Time t;
     publish(TopicInfo::ID_TIME, &t);
-    rt_time = hardware_.time();
+    rt_time = hardware_.time_ns();
   }
 
   void syncTime(uint8_t * data)
   {
     std_msgs::Time t;
-    uint32_t offset = hardware_.time() - rt_time;
+    uint64_t offset = hardware_.time_ns() - rt_time;
 
     t.deserialize(data);
-    t.data.sec += offset / 1000;
-    t.data.nsec += (offset % 1000) * 1000000UL;
+    t.data.sec += offset / 1000000000;
+    t.data.nsec += offset % 1000000000;
 
     this->setNow(t.data);
     last_sync_receive_time = hardware_.time();
@@ -391,19 +391,19 @@ public:
 
   Time now()
   {
-    uint32_t ms = hardware_.time();
+    uint64_t ns = hardware_.time_ns();
     Time current_time;
-    current_time.sec = ms / 1000 + sec_offset;
-    current_time.nsec = (ms % 1000) * 1000000UL + nsec_offset;
+    current_time.sec = ns / 1000000000 + sec_offset;
+    current_time.nsec = (ns % 1000000000) + nsec_offset;
     normalizeSecNSec(current_time.sec, current_time.nsec);
     return current_time;
   }
 
   void setNow(Time & new_now)
   {
-    uint32_t ms = hardware_.time();
-    sec_offset = new_now.sec - ms / 1000 - 1;
-    nsec_offset = new_now.nsec - (ms % 1000) * 1000000UL + 1000000000UL;
+    uint32_t ns = hardware_.time_ns();
+    sec_offset = new_now.sec - ns / 1000000000 - 1;
+    nsec_offset = new_now.nsec - (ns % 1000000000) + 1000000000UL;
     normalizeSecNSec(sec_offset, nsec_offset);
   }
 

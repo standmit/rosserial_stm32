@@ -117,13 +117,9 @@ path += "/ROS/"
 print "\nExporting to %s" % path
 
 # copy ros_lib stuff in
-os.mkdir(path)
 src_lib_dir = rosserial_stm32_dir + "/src/ros_lib/"
-shutil.copyfile(family_dir + family, path + header_filename % ("FXXX"))
-files = os.listdir(src_lib_dir[:-1])
-for f in files:
-  if os.path.isfile(src_lib_dir + f):
-    shutil.copyfile(src_lib_dir + f, path + f)
+shutil.copytree(src_lib_dir, path)
+shutil.copy(family_dir + family, path + header_filename % ("FXXX"))
 rosserial_client_copy_files(rospack, path)
 
 # generate messages

@@ -80,8 +80,12 @@ class STM32Hardware {
       return HAL_GetTick();
     }
   
+    uint64_t time_ns(uint32_t ms, uint32_t ticks) {
+        return (uint64_t)ms * 1000000 + ticks * systick_period_ns;
+    }
+    
     uint64_t time_ns() {
-    	return (uint64_t)time() * 1000000 + SysTick->VAL * systick_period_ns;
+        return time_ns(this->time(), SysTick->VAL);
     }
 
   protected:

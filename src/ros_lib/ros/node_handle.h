@@ -401,7 +401,7 @@ public:
 
   void setNow(Time & new_now)
   {
-    uint32_t ns = hardware_.time_ns();
+    uint64_t ns = hardware_.time_ns();
     sec_offset = new_now.sec - ns / 1000000000 - 1;
     nsec_offset = new_now.nsec - (ns % 1000000000) + 1000000000UL;
     normalizeSecNSec(sec_offset, nsec_offset);

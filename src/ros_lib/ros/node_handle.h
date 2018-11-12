@@ -155,7 +155,7 @@ public:
     return &hardware_;
   }
 
-  /* Start serial, initialize buffers */
+  /* Start using default UART, initialize buffers */
   void initNode()
   {
     hardware_.init();
@@ -165,10 +165,10 @@ public:
     topic_ = 0;
   };
 
-  /* Start a named port, which may be network server IP, initialize buffers */
-  void initNode(char *portName)
+  /* Start using a specified UART initialize buffers */
+  void initNode(UART_HandleTypeDef* const huart)
   {
-    hardware_.init(portName);
+    hardware_.init(huart);
     mode_ = 0;
     bytes_ = 0;
     index_ = 0;

@@ -36,23 +36,91 @@
 #define ROS_STM32_HARDWARE_H_
 
 #include "STM32FXXX.h"
+#include "RingBuffer.h"
 
 extern UART_HandleTypeDef huart1;
 
 class STM32Hardware {
+	public:
+		static STM32Hardware* instance;
   protected:
     UART_HandleTypeDef *huart;
   
     uint8_t tick_period_ms;
     uint32_t systick_period_ns;
 
+    bool use_dma;
+    void (*uart_tx_ext_callback)(UART_HandleTypeDef*);
+    void (*uart_rx_ext_callback)(UART_HandleTypeDef*);
+    RingBuffer<512> buffer_tx;
+    RingBuffer<512> buffer_rx;
+    volatile bool uart_tx_busy;
+    volatile bool uart_rx_busy;
+    RB_SizeType count_to_receive;
+
+    RB_SizeType GetDMAReceivedCount() {
+    	RB_SizeType count = count_to_receive - huart->hdmarx->Instance->CNDTR;
+    	count_to_receive -= count;
+    	buffer_rx.OccupyFreeSpace(count);
+    	return count;
+    }
+
   public:
+    struct Argument {
+    	enum {
+    		arg_huart,
+			arg_use_dma,
+			arg_uart_tx_callback,
+			arg_uart_rx_callback
+    	} type;
+
+    	union {
+    		UART_HandleTypeDef* huart;
+    		bool use_dma;
+    		void (*uart_callback)(UART_HandleTypeDef*);
+    	} value;
+
+    	Argument(UART_HandleTypeDef* const huart_): type(arg_huart) { value.huart = huart_; };
+    	Argument(const bool use_dma_): type(arg_use_dma) { value.use_dma = use_dma_; };
+    	Argument(void (*const uart_callback_)(UART_HandleTypeDef*), const bool tx) { type = tx ? arg_uart_tx_callback : arg_uart_rx_callback; value.uart_callback = uart_callback_; };
+    };
+
+    typedef uint8_t arg_count_type;
+
+
     STM32Hardware():
-      huart(&huart1)
+      huart(NULL),
+	  use_dma(false),
+	  uart_tx_ext_callback(NULL),
+	  uart_rx_ext_callback(NULL),
+	  buffer_tx(),
+	  buffer_rx(),
+	  uart_tx_busy(false),
+	  uart_rx_busy(false),
+	  count_to_receive(0)
     { }
   
-    void init(UART_HandleTypeDef* const uart_handle) {
-        huart = uart_handle;
+    void init(char* const portName) {
+    	instance = this;
+    	const arg_count_type argc = *((arg_count_type*)portName);
+    	Argument* argv = (Argument*)(portName + 1);
+    	for (arg_count_type i = 0; i < argc; i++) {
+    		switch (argv[i].type) {
+    			case Argument::arg_huart:
+    				huart = argv[i].value.huart;
+    				break;
+    			case Argument::arg_use_dma:
+    				use_dma = argv[i].value.use_dma;
+    				break;
+    			case Argument::arg_uart_tx_callback:
+    				uart_tx_ext_callback = argv[i].value.uart_callback;
+    				break;
+    			case Argument::arg_uart_rx_callback:
+    				uart_rx_ext_callback = argv[i].value.uart_callback;
+    				break;
+
+    		}
+    	}
 
         tick_period_ms = 1000 / HAL_GetTickFreq(); // 1 / HAL_GetTickFreq() * 1000
         if (SysTick->CTRL && SYSTICK_CLKSOURCE_HCLK) {
@@ -60,23 +128,98 @@ class STM32Hardware {
         } else {
             systick_period_ns = 8000000000 / HAL_RCC_GetHCLKFreq(); // 1 / ( HAL_RCC_GetHCLKFreq() / 8 ) * 1000000000
         }
+
+        receive_part();
     }
 
   
     void init()
     {
-        this->init(&huart1);
+        huart = NULL;
+        use_dma = false;
+        uart_tx_ext_callback = NULL;
+        uart_rx_ext_callback = NULL;
+        uart_tx_busy = false;
+        uart_rx_busy = false;
     }
 
     int read() {
-      uint8_t rxByte;
-    	if(HAL_UART_Receive(huart, &rxByte, 1, 2) == HAL_OK)
-    		return rxByte;
-    	return -1;
+    	uint8_t rxByte;
+    	if (use_dma) {
+    		GetDMAReceivedCount();
+			if (buffer_rx.Read(&rxByte, 1)) {
+				return rxByte;
+			} else {
+				return -1;
+			}
+    	} else {
+    		if(HAL_UART_Receive(huart, &rxByte, 1, 2) == HAL_OK) {
+				return rxByte;
+    		} else {
+    			return -1;
+    		}
+    	}
     }
 
-    void write(uint8_t* data, int length) {
-      HAL_UART_Transmit(huart, data, length, 10);
+    void write(uint8_t* data, int length, const bool wait = false) {
+    	if (use_dma) {
+    		if (wait) {
+    			while (uart_tx_busy) { transmit_part(); }
+    			HAL_UART_Transmit(huart, data, length, 10);
+    		} else {
+				while (!buffer_tx.Write(data, length)) { transmit_part(); }
+			}
+
+    		transmit_part();
+    	} else {
+    		HAL_UART_Transmit(huart, data, length, 10);
+    	}
+    }
+
+    void transmit_part() {
+    	if (!uart_tx_busy) {
+			RB_DataType* buf;
+			RB_SizeType count = buffer_tx.GetLastPart(buf);
+			if (count)
+				uart_tx_busy = (HAL_UART_Transmit_DMA(huart, buf, count) == HAL_OK);
+    	}
+    }
+
+    void receive_part() {
+    	if (!uart_rx_busy) {
+    		RB_DataType* buf;
+    		RB_SizeType count = buffer_rx.GetFreeSpace(buf);
+    		if (count) {
+    			count_to_receive = count;
+    			uart_rx_busy = (HAL_UART_Receive_DMA(huart, buf, count) == HAL_OK);
+    		}
+    	}
+    }
+
+    void uart_tx_callback(UART_HandleTypeDef* const uart_handle) {
+		if ((huart != NULL) && (uart_handle == huart) && use_dma && uart_tx_busy) {
+			buffer_tx.DropLastPart();
+			uart_tx_busy = false;
+			transmit_part();
+		}
+
+		if (uart_tx_ext_callback != NULL)
+			(*uart_tx_ext_callback)(uart_handle);
+    }
+
+    void uart_rx_callback(UART_HandleTypeDef* const uart_handle) {
+    	if ((huart != NULL) && (uart_handle == huart) && use_dma && uart_rx_busy) {
+    		GetDMAReceivedCount();
+    		uart_rx_busy = false;
+    		receive_part();
+    	}
+
+    	if (uart_rx_ext_callback != NULL)
+    		(*uart_rx_ext_callback)(uart_handle);
+    }
+
+    void uart_error_callback(UART_HandleTypeDef* const uart_handle) {
+    	uart_tx_callback(uart_handle);
     }
 
     unsigned long time() {
@@ -90,9 +233,24 @@ class STM32Hardware {
     uint64_t time_ns() {
         return time_ns(this->time(), SysTick->VAL);
     }
-
-  protected:
 };
+
+STM32Hardware* STM32Hardware::instance = NULL;
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+	if (STM32Hardware::instance != NULL)
+		STM32Hardware::instance->uart_tx_callback(huart);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+	if (STM32Hardware::instance != NULL)
+		STM32Hardware::instance->uart_rx_callback(huart);
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+	if (STM32Hardware::instance != NULL)
+		STM32Hardware::instance->uart_error_callback(huart);
+}
 
 #endif
 

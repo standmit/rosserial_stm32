@@ -50,7 +50,7 @@ namespace ros
 class NodeHandleBase_
 {
 public:
-  virtual int publish(int id, const Msg* msg) = 0;
+  virtual int publish(int id, const Msg* msg, const bool wait = false) = 0;
   virtual int spinOnce() = 0;
   virtual bool connected() = 0;
 };
@@ -155,7 +155,7 @@ public:
     return &hardware_;
   }
 
-  /* Start using default UART, initialize buffers */
+  /* Start serial, initialize buffers */
   void initNode()
   {
     hardware_.init();
@@ -165,10 +165,10 @@ public:
     topic_ = 0;
   };
 
-  /* Start using a specified UART initialize buffers */
-  void initNode(UART_HandleTypeDef* const huart)
+  /* Start a named port, which may be network server IP, initialize buffers */
+  void initNode(char *portName)
   {
-    hardware_.init(huart);
+    hardware_.init(portName);
     mode_ = 0;
     bytes_ = 0;
     index_ = 0;
@@ -372,7 +372,7 @@ public:
   void requestSyncTime()
   {
     std_msgs::Time t;
-    publish(TopicInfo::ID_TIME, &t);
+    publish(TopicInfo::ID_TIME, &t, true);
     rt_time = hardware_.time_ns();
   }
 
@@ -490,7 +490,7 @@ public:
         ti.message_type = (char *) publishers[i]->msg_->getType();
         ti.md5sum = (char *) publishers[i]->msg_->getMD5();
         ti.buffer_size = OUTPUT_SIZE;
-        publish(publishers[i]->getEndpointType(), &ti);
+        publish(publishers[i]->getEndpointType(), &ti, true);
       }
     }
     for (i = 0; i < MAX_SUBSCRIBERS; i++)
@@ -502,13 +502,14 @@ public:
         ti.message_type = (char *) subscribers[i]->getMsgType();
         ti.md5sum = (char *) subscribers[i]->getMsgMD5();
         ti.buffer_size = INPUT_SIZE;
-        publish(subscribers[i]->getEndpointType(), &ti);
+        publish(subscribers[i]->getEndpointType(), &ti, true);
       }
     }
+
     configured_ = true;
   }
 
-  virtual int publish(int id, const Msg * msg)
+  virtual int publish(int id, const Msg * msg, const bool wait = false)
   {
     if (id >= 100 && !configured_)
       return 0;
@@ -534,7 +535,7 @@ public:
 
     if (l <= OUTPUT_SIZE)
     {
-      hardware_.write(message_out, l);
+      hardware_.write(message_out, l, wait);
       return l;
     }
     else

@@ -20,7 +20,7 @@ class RingBuffer {
 			return (write_i - read_i);
 		}
 
-		RB_SizeType Count()const {
+		inline RB_SizeType Count()const {
 			if (read_i <= write_i) {
 				return CountRW();
 			} else {
@@ -28,7 +28,7 @@ class RingBuffer {
 			}
 		}
 
-		RB_SizeType FreeSpace()const {
+		inline RB_SizeType FreeSpace()const {
 			return (SIZE - Count() - 1);
 		}
 
@@ -55,31 +55,15 @@ class RingBuffer {
 			}
 		}
 
-		bool Read(RB_DataType* buffer, RB_SizeType count = 1) {
-			if (read_i <= write_i) {
-				RB_SizeType buffer_count = Count();
-				if (count > buffer_count) {
-					memcpy(buffer, &data[read_i], buffer_count);
-					read_i = write_i;
-					return false;
-				} else {
-					memcpy(buffer, &data[read_i], count);
-					read_i += count;
-					return true;
-				}
+		bool Read(RB_DataType& buffer) {
+			if (read_i != write_i) {
+				buffer = data[read_i];
+				read_i++;
+				if (read_i >= SIZE)
+					read_i = 0;
+				return true;
 			} else {
-				RB_SizeType part_size = SIZE - read_i;
-				memcpy(buffer, &data[read_i], part_size);
-				RB_SizeType buffer_count = Count();
-				if (count > buffer_count) {
-					memcpy(buffer + part_size, &data[0], buffer_count - part_size);
-					read_i = write_i;
-					return false;
-				} else {
-					read_i = count - part_size;
-					memcpy(buffer + part_size, &data[0], read_i);
-					return true;
-				}
+				return false;
 			}
 		}
 
@@ -96,7 +80,7 @@ class RingBuffer {
 			return sz;
 		}
 
-		void DropLastPart() {
+		inline void DropLastPart() {
 			read_i = lastpart_end;
 		}
 
@@ -104,8 +88,8 @@ class RingBuffer {
 			buf = &data[write_i];
 			RB_SizeType sz;
 			if (write_i < read_i) {
-				sz = CountRW();
-				freespace_end = read_i;
+				sz = read_i - 1 - write_i;
+				freespace_end = read_i - 1;
 			} else {
 				sz = SIZE - write_i;
 				freespace_end = 0;
@@ -113,7 +97,7 @@ class RingBuffer {
 			return sz;
 		}
 
-		void OccupyFreeSpace(const int32_t count = -1) {
+		inline void OccupyFreeSpace(const int32_t count = -1) {
 			if (count == -1) {
 				write_i = freespace_end;
 			} else {

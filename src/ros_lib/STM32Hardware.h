@@ -147,7 +147,7 @@ class STM32Hardware {
     	uint8_t rxByte;
     	if (use_dma) {
     		GetDMAReceivedCount();
-			if (buffer_rx.Read(&rxByte, 1)) {
+			if (buffer_rx.Read(rxByte)) {
 				return rxByte;
 			} else {
 				return -1;

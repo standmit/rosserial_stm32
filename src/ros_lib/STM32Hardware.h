@@ -245,10 +245,10 @@ class STM32Hardware {
 
 	public:
 
-#define ITS_MY_HUART ((huart != NULL) && (uart_handle == huart))
+#define ITS_MY_HUART (huart != NULL) && (uart_handle == huart)
 
 		void uart_tx_callback(UART_HandleTypeDef* const uart_handle) {
-			if ITS_MY_HUART
+			if (ITS_MY_HUART)
 				continue_tx();
 
 			if (uart_tx_ext_callback != NULL)
@@ -256,16 +256,27 @@ class STM32Hardware {
 		}
 
 		void uart_rx_callback(UART_HandleTypeDef* const uart_handle) {
-			if ITS_MY_HUART
+			if (ITS_MY_HUART)
 				continue_rx();
 
 			if (uart_rx_ext_callback != NULL)
 				(*uart_rx_ext_callback)(uart_handle);
 		}
 
+#define CHECK_FLAG(state,flag) ((state & flag) == flag)
+
 		void uart_er_callback(UART_HandleTypeDef* const uart_handle) {
-			if ITS_MY_HUART
-				continue_tx();
+			if (ITS_MY_HUART) {
+				if (use_dma && CHECK_FLAG(huart->ErrorCode, HAL_UART_ERROR_DMA)) {
+					if (uart_tx_busy && (huart->hdmatx->ErrorCode != HAL_DMA_ERROR_NONE))
+						continue_tx();
+					if (uart_rx_busy && (huart->hdmarx->ErrorCode != HAL_DMA_ERROR_NONE))
+						continue_rx();
+				} else {
+					continue_tx();
+					continue_rx();
+				}
+			}
 
 			if (uart_er_ext_callback != NULL)
 				(*uart_er_ext_callback)(uart_handle);

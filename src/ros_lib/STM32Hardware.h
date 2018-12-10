@@ -58,11 +58,17 @@ class STM32Hardware {
 		volatile bool uart_tx_busy;
 		volatile bool uart_rx_busy;
 		RB_SizeType count_to_receive;
+		RB_SizeType count_to_transmit;
 
 		RB_SizeType GetDMAReceivedCount() {
 			RB_SizeType count = count_to_receive - huart->hdmarx->Instance->CNDTR;
 			count_to_receive -= count;
-			buffer_rx.OccupyFreeSpace(count);
+			return count;
+		}
+
+		RB_SizeType GetDMATransmittedCount() {
+			RB_SizeType count = count_to_transmit - huart->hdmatx->Instance->CNDTR;
+			count_to_transmit -= count;
 			return count;
 		}
 
@@ -175,7 +181,7 @@ class STM32Hardware {
 		int read() {
 			uint8_t rxByte;
 			if (use_dma) {
-				GetDMAReceivedCount();
+				buffer_rx.OccupyFreeSpace(GetDMAReceivedCount());
 				if (buffer_rx.Read(rxByte)) {
 					return rxByte;
 				} else {
@@ -193,10 +199,11 @@ class STM32Hardware {
 		void write(uint8_t* data, int length, const bool wait = false) {
 			if (use_dma) {
 				if (wait) {
+					// TODO: избавиться от необходимости ожидания при синхронизации
 					while (uart_tx_busy) { transmit_part(); }
 					HAL_UART_Transmit(huart, data, length, 10);
 				} else {
-					while (!buffer_tx.Write(data, length)) { transmit_part(); }
+					while (!buffer_tx.Write(data, length)) { buffer_tx.DropLastPart(GetDMATransmittedCount()); }
 				}
 
 				transmit_part();
@@ -209,8 +216,10 @@ class STM32Hardware {
 			if (!uart_tx_busy) {
 				RB_DataType* buf;
 				RB_SizeType count = buffer_tx.GetLastPart(buf);
-				if (count)
+				if (count) {
+					count_to_transmit = count;
 					uart_tx_busy = (HAL_UART_Transmit_DMA(huart, buf, count) == HAL_OK);
+				}
 			}
 		}
 
@@ -229,7 +238,7 @@ class STM32Hardware {
 
 		void continue_tx() {
 			if (use_dma && uart_tx_busy) {
-				buffer_tx.DropLastPart();
+				buffer_tx.DropLastPart(GetDMATransmittedCount());
 				uart_tx_busy = false;
 				transmit_part();
 			}
@@ -237,7 +246,7 @@ class STM32Hardware {
 
 		void continue_rx() {
 			if (use_dma && uart_rx_busy) {
-				GetDMAReceivedCount();
+				buffer_rx.OccupyFreeSpace(GetDMAReceivedCount());
 				uart_rx_busy = false;
 				receive_part();
 			}

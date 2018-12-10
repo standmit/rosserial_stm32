@@ -80,8 +80,12 @@ class RingBuffer {
 			return sz;
 		}
 
-		inline void DropLastPart() {
-			read_i = lastpart_end;
+		inline void DropLastPart(const int32_t count = -1) {
+			if (count == -1) {
+				read_i = lastpart_end;
+			} else {
+				read_i = (read_i + count) % SIZE;
+			}
 		}
 
 		RB_SizeType GetFreeSpace(RB_DataType* &buf) {

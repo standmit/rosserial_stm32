@@ -52,6 +52,7 @@ class STM32Hardware {
     bool use_dma;
     void (*uart_tx_ext_callback)(UART_HandleTypeDef*);
     void (*uart_rx_ext_callback)(UART_HandleTypeDef*);
+    void (*uart_er_ext_callback)(UART_HandleTypeDef*);
     RingBuffer<512> buffer_tx;
     RingBuffer<512> buffer_rx;
     volatile bool uart_tx_busy;
@@ -71,7 +72,8 @@ class STM32Hardware {
     		arg_huart,
 			arg_use_dma,
 			arg_uart_tx_callback,
-			arg_uart_rx_callback
+			arg_uart_rx_callback,
+			arg_uart_er_callback
     	} type;
 
     	union {
@@ -80,9 +82,31 @@ class STM32Hardware {
     		void (*uart_callback)(UART_HandleTypeDef*);
     	} value;
 
+    	typedef enum {
+			uart_tx_cb,
+			uart_rx_cb,
+			uart_er_cb
+		} uart_cb_type;
+
     	Argument(UART_HandleTypeDef* const huart_): type(arg_huart) { value.huart = huart_; };
     	Argument(const bool use_dma_): type(arg_use_dma) { value.use_dma = use_dma_; };
-    	Argument(void (*const uart_callback_)(UART_HandleTypeDef*), const bool tx) { type = tx ? arg_uart_tx_callback : arg_uart_rx_callback; value.uart_callback = uart_callback_; };
+    	Argument(
+    			void (*const uart_callback_)(UART_HandleTypeDef*),
+				const uart_cb_type cb_type
+		) {
+    		switch (cb_type) {
+    			case uart_tx_cb:
+    				type = arg_uart_tx_callback;
+    				break;
+    			case uart_rx_cb:
+    				type = arg_uart_rx_callback;
+    				break;
+    			case uart_er_cb:
+    				type = arg_uart_er_callback;
+    				break;
+    		}
+    		value.uart_callback = uart_callback_;
+    	}
     };
 
     typedef uint8_t arg_count_type;
@@ -93,6 +117,7 @@ class STM32Hardware {
 	  use_dma(false),
 	  uart_tx_ext_callback(NULL),
 	  uart_rx_ext_callback(NULL),
+	  uart_er_ext_callback(NULL),
 	  buffer_tx(),
 	  buffer_rx(),
 	  uart_tx_busy(false),
@@ -118,6 +143,9 @@ class STM32Hardware {
     			case Argument::arg_uart_rx_callback:
     				uart_rx_ext_callback = argv[i].value.uart_callback;
     				break;
+    			case Argument::arg_uart_er_callback:
+    				uart_er_ext_callback = argv[i].value.uart_callback;
+    				break;
 
     		}
     	}
@@ -139,6 +167,7 @@ class STM32Hardware {
         use_dma = false;
         uart_tx_ext_callback = NULL;
         uart_rx_ext_callback = NULL;
+        uart_er_ext_callback = NULL;
         uart_tx_busy = false;
         uart_rx_busy = false;
     }
@@ -218,8 +247,11 @@ class STM32Hardware {
     		(*uart_rx_ext_callback)(uart_handle);
     }
 
-    void uart_error_callback(UART_HandleTypeDef* const uart_handle) {
+    void uart_er_callback(UART_HandleTypeDef* const uart_handle) {
     	uart_tx_callback(uart_handle);
+
+    	if (uart_er_ext_callback != NULL)
+    		(*uart_er_ext_callback)(uart_handle);
     }
 
     unsigned long time() {
@@ -249,7 +281,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	if (STM32Hardware::instance != NULL)
-		STM32Hardware::instance->uart_error_callback(huart);
+		STM32Hardware::instance->uart_er_callback(huart);
 }
 
 #endif

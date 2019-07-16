@@ -118,6 +118,7 @@ print "\nExporting to %s" % path
 
 # copy ros_lib stuff in
 src_lib_dir = rosserial_stm32_dir + "/src/ros_lib/"
+shutil.rmtree(path)
 shutil.copytree(src_lib_dir, path)
 shutil.copy(family_dir + family, path + header_filename % ("FXXX"))
 

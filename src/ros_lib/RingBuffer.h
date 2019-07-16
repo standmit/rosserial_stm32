@@ -2,6 +2,7 @@
 #define RINGBUFFER_H_
 
 #include "stdint.h"
+#include <cstring>
 
 typedef uint16_t RB_SizeType;
 typedef uint8_t RB_DataType;
@@ -10,12 +11,20 @@ template<RB_SizeType SIZE>
 class RingBuffer {
 	protected:
 		RB_DataType data[SIZE];
-		RB_SizeType read_i = 0;
-		RB_SizeType write_i = 0;
-		RB_SizeType lastpart_end = read_i;
-		RB_SizeType freespace_end = write_i;
+		RB_SizeType read_i;
+		RB_SizeType write_i;
+		RB_SizeType lastpart_end;
+		RB_SizeType freespace_end;
 
 	public:
+		RingBuffer()
+			: data()
+			, read_i(0)
+			, write_i(0)
+			, lastpart_end(read_i)
+			, freespace_end(write_i)
+		{ }	
+
 		inline RB_SizeType CountRW()const {
 			return (write_i - read_i);
 		}

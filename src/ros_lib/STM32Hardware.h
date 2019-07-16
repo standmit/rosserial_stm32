@@ -38,6 +38,8 @@
 #include "STM32FXXX.h"
 #include "RingBuffer.h"
 
+#define BUFFER_SIZE 512
+
 extern UART_HandleTypeDef huart1;
 
 class STM32Hardware {
@@ -50,11 +52,13 @@ class STM32Hardware {
 		uint32_t systick_period_ns;
 
 		bool use_dma;
+		bool buffer_tx_lock;		///< turns True when any work performs in buffers TX
+		bool buffer_rx_lock;		///< turns True when any work performs in buffers RX
 		void (*uart_tx_ext_callback)(UART_HandleTypeDef*);
 		void (*uart_rx_ext_callback)(UART_HandleTypeDef*);
 		void (*uart_er_ext_callback)(UART_HandleTypeDef*);
-		RingBuffer<512> buffer_tx;
-		RingBuffer<512> buffer_rx;
+		RingBuffer<BUFFER_SIZE> buffer_tx;
+		RingBuffer<BUFFER_SIZE> buffer_rx;
 		volatile bool uart_tx_busy;
 		volatile bool uart_rx_busy;
 		RB_SizeType count_to_receive;
@@ -71,6 +75,16 @@ class STM32Hardware {
 			count_to_transmit -= count;
 			return count;
 		}
+
+		enum InterruptedCallback{
+			no_callback = 0,
+			tx_callback = 1,
+			rx_callback = 2,
+			er_callback = 3
+		};
+
+		InterruptedCallback interrupted_callback;
+		UART_HandleTypeDef *interrupted_huart;
 
 	public:
 		struct Argument {
@@ -121,6 +135,8 @@ class STM32Hardware {
 		STM32Hardware():
 		  huart(NULL),
 		  use_dma(false),
+		  buffer_tx_lock(false),
+		  buffer_rx_lock(false),
 		  uart_tx_ext_callback(NULL),
 		  uart_rx_ext_callback(NULL),
 		  uart_er_ext_callback(NULL),
@@ -128,7 +144,9 @@ class STM32Hardware {
 		  buffer_rx(),
 		  uart_tx_busy(false),
 		  uart_rx_busy(false),
-		  count_to_receive(0)
+		  count_to_receive(0),
+		  interrupted_callback(InterruptedCallback::no_callback),
+		  interrupted_huart(NULL)
 		{ }
 
 		void init(char* const portName) {
@@ -176,17 +194,30 @@ class STM32Hardware {
 			uart_er_ext_callback = NULL;
 			uart_tx_busy = false;
 			uart_rx_busy = false;
+			buffer_tx_lock = false;
+			buffer_rx_lock = false;
 		}
 
 		int read() {
 			uint8_t rxByte;
+			int result;
 			if (use_dma) {
+				//! lock for prevent callback executing
+				buffer_rx_lock = true;
+
 				buffer_rx.OccupyFreeSpace(GetDMAReceivedCount());
 				if (buffer_rx.Read(rxByte)) {
-					return rxByte;
+					result = int(rxByte);
 				} else {
-					return -1;
+					result = -1;
 				}
+
+				//! unlock for allow callback executing
+				buffer_rx_lock = false;
+				//! execute callback if was catched while was busy on buffer
+				continue_callback();
+
+				return result;
 			} else {
 				if(HAL_UART_Receive(huart, &rxByte, 1, 2) == HAL_OK) {
 					return rxByte;
@@ -203,7 +234,15 @@ class STM32Hardware {
 					while (uart_tx_busy) { transmit_part(); }
 					HAL_UART_Transmit(huart, data, length, 10);
 				} else {
+					//! lock for prevent callback executing
+					buffer_tx_lock = true;
+
 					while (!buffer_tx.Write(data, length)) { buffer_tx.DropLastPart(GetDMATransmittedCount()); }
+
+					//! unlock for allow callback executing
+					buffer_tx_lock = false;
+					//! execute callback if was catched while was busy on buffer
+					continue_callback();
 				}
 
 				transmit_part();
@@ -252,21 +291,59 @@ class STM32Hardware {
 			}
 		}
 
+		void continue_callback() {
+			//! Looking for interrupted callbacks
+			switch(interrupted_callback){
+				//! If there are no interruptions, quiting function. Otherwise process missed callback
+				case InterruptedCallback::no_callback:
+					return;
+				case InterruptedCallback::tx_callback:
+					uart_tx_callback(interrupted_huart);
+					break;
+				case InterruptedCallback::rx_callback:
+					uart_rx_callback(interrupted_huart);
+					break;
+				case InterruptedCallback::er_callback:
+					uart_er_callback(interrupted_huart);
+					break;
+			}
+
+			//! Reseting interrupt callback variables
+			interrupted_callback = InterruptedCallback::no_callback;
+			interrupted_huart = NULL;
+		}
+
 	public:
 
 #define ITS_MY_HUART (huart != NULL) && (uart_handle == huart)
 
 		void uart_tx_callback(UART_HandleTypeDef* const uart_handle) {
-			if (ITS_MY_HUART)
+			if (ITS_MY_HUART) {
+				//! If buffer was locked, saving calback type and data handler
+				if (buffer_tx_lock) {
+					interrupted_callback = InterruptedCallback::tx_callback;
+					interrupted_huart = huart;
+					return;
+				}
+
 				continue_tx();
+			}
 
 			if (uart_tx_ext_callback != NULL)
 				(*uart_tx_ext_callback)(uart_handle);
 		}
 
 		void uart_rx_callback(UART_HandleTypeDef* const uart_handle) {
-			if (ITS_MY_HUART)
+			if (ITS_MY_HUART) {
+				//! If buffer was locked, saving calback type and data handler
+				if (buffer_rx_lock) {
+					interrupted_callback = InterruptedCallback::rx_callback;
+					interrupted_huart = huart;
+					return;
+				}
+
 				continue_rx();
+			}
 
 			if (uart_rx_ext_callback != NULL)
 				(*uart_rx_ext_callback)(uart_handle);
@@ -276,6 +353,13 @@ class STM32Hardware {
 
 		void uart_er_callback(UART_HandleTypeDef* const uart_handle) {
 			if (ITS_MY_HUART) {
+				//! If buffer was locked, saving calback type and data handler
+				if (buffer_tx_lock || buffer_rx_lock) {
+					interrupted_callback = InterruptedCallback::er_callback;
+					interrupted_huart = huart;
+					return;
+				}
+				
 				if (use_dma && CHECK_FLAG(huart->ErrorCode, HAL_UART_ERROR_DMA)) {
 					if (uart_tx_busy && (huart->hdmatx->ErrorCode != HAL_DMA_ERROR_NONE))
 						continue_tx();
